@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-AthiDuo is a personal, local-only Apple-silicon macOS 26+ utility forked from MacDuo `v0.1.14`. It offers one fixed Duo effect only; it has no updater, telemetry, accounts, networking, packaging installer, or Intel support.
+AthiDuo is a personal, local-only Apple-silicon macOS 26+ utility forked from MacDuo `v0.1.14`. It offers one fixed Duo effect only; it has no updater, telemetry, accounts, networking, or Intel support. Distribution is a drag-to-install DMG.
 
 ## Experience
 

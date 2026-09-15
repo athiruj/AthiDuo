@@ -24,7 +24,7 @@ swift run AthiDuo --render-check
 bash build.sh
 ```
 
-`build.sh` produces `build/AthiDuo.app` with ad-hoc signing. Move it to `/Applications` before using it regularly. A rebuilt ad-hoc app can require Screen Recording approval again.
+`build.sh` produces `build/AthiDuo.app` and a drag-to-install `build/AthiDuo.dmg`, both with ad-hoc signing. Open the DMG and drag AthiDuo onto the Applications alias. A rebuilt ad-hoc app can require Screen Recording approval again; macOS can also require a Control-click → Open on the first launch because the app is not notarized.
 
 ## Load from GitHub
 

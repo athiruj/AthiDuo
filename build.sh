@@ -11,8 +11,9 @@ BIN_DIR="$(swift build -c release --scratch-path "$BUILD_DIR" --arch arm64 --sho
 
 mkdir -p "$OUTPUT_DIR"
 APP="$(cd "$OUTPUT_DIR" && pwd)/AthiDuo.app"
-if [[ -e "$APP" ]]; then
-  printf 'Refusing to replace existing app: %s\n' "$APP" >&2
+DMG="$(cd "$OUTPUT_DIR" && pwd)/AthiDuo.dmg"
+if [[ -e "$APP" || -e "$DMG" ]]; then
+  printf 'Refusing to replace an existing build in: %s\n' "$OUTPUT_DIR" >&2
   exit 2
 fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/en.lproj"
@@ -46,6 +47,14 @@ codesign --force --sign "$SIGNING_IDENTITY" --identifier com.athi.athiduo "$APP"
 codesign --verify --strict "$APP"
 plutil -lint "$APP/Contents/Info.plist"
 printf 'Built %s\n' "$APP"
+
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+ditto --norsrc --noextattr "$APP" "$STAGING_DIR/AthiDuo.app"
+ln -s /Applications "$STAGING_DIR/Applications"
+hdiutil create -volname "AthiDuo" -srcfolder "$STAGING_DIR" -format UDZO "$DMG"
+printf 'Built %s\n' "$DMG"
+
 if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   printf 'Ad-hoc build: macOS may ask for Screen Recording permission after a rebuild.\n'
 fi
