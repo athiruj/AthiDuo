@@ -3,7 +3,7 @@ import MetalKit
 import CoreVideo
 import FoldCore
 
-/// 48 bytes, mirrored field for field by `Uniforms` in `FoldShader.source`.
+/// Mirrored field for field by `Uniforms` in `FoldShader.source`.
 struct FoldUniforms: Equatable {
     var progress: Float = 0
     var perspective: Float = 0.7
@@ -11,15 +11,12 @@ struct FoldUniforms: Equatable {
     var shadow: Float = 0.65
     var size = SIMD2<Float>(1, 1)
     var fadeOnly: Float = 0
-    var effect: UInt32 = FoldEffect.fallback.shaderIndex
     // A negative value retains normalized-progress fixtures; app paths provide physical defocus.
     var defocus: Float = -1
     var coverage: Float = 1
     // Negative values keep normalized-progress fixtures convenient. App paths supply radians.
     var tilt: Float = -1
     var referenceAngle: Float = 105
-
-    var selectedEffect: FoldEffect { FoldEffect.resolve(shaderIndex: effect) }
 }
 
 final class FrameStore: @unchecked Sendable {
@@ -311,7 +308,7 @@ final class FoldRenderer: NSObject, MTKViewDelegate {
     func encode(command: MTLCommandBuffer, pass: MTLRenderPassDescriptor, texture: MTLTexture, uniforms: FoldUniforms, sourceRevision: UInt64? = nil) throws {
         let moving = uniforms.progress > 0.00001 && uniforms.progress < 1 && uniforms.fadeOnly < 0.5
         // Duo skips the pyramid at zero Softness and keeps the open image exact.
-        let needsBlur = moving && (uniforms.blur > 0 || uniforms.selectedEffect.needsPrefilteredSource)
+        let needsBlur = moving && uniforms.blur > 0
         let blurred = needsBlur ? try prepareBlur(command: command, input: texture, revision:sourceRevision) : texture
         guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { throw AppError.message(L10n.text("Render encoder unavailable.")) }
         var uniforms = uniforms

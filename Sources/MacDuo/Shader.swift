@@ -2,7 +2,7 @@ import Foundation
 
 enum FoldShader {
     /// One original, bottom-hinged Duo transform. The uniform layout mirrors
-    /// `FoldUniforms` in Renderer.swift; the retained effect slot is fixed at 0.
+    /// `FoldUniforms` in Renderer.swift.
     static let source = #"""
     #include <metal_stdlib>
     using namespace metal;
@@ -14,7 +14,6 @@ enum FoldShader {
         float shadow;
         float2 size;
         float fadeOnly;
-        uint effect;
         float defocus;
         float coverage;
         float tilt;

@@ -1,10 +1,10 @@
 import Foundation
 
 public enum FoldMath {
-    public static func progress(angle: Double, clearAngle: Double) -> Double {
-        guard angle.isFinite, clearAngle.isFinite else { return 0 }
-        let clear = min(140, max(60, clearAngle))
-        let t = min(1, max(0, (clear - angle) / (clear - 5)))
+    public static func progress(angle: Double, referenceAngle: Double) -> Double {
+        guard angle.isFinite, referenceAngle.isFinite else { return 0 }
+        let reference = min(140, max(60, referenceAngle))
+        let t = min(1, max(0, (reference - angle) / (reference - 5)))
         return t * t * (3 - 2 * t)
     }
 

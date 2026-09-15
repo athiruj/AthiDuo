@@ -15,23 +15,14 @@ final class OverlayPanel: NSPanel {
     override func mouseDown(with event: NSEvent) { dismissAction?() }
 }
 
-enum AppAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark
-    var id: String { rawValue }
-    var title: String { L10n.text(rawValue.capitalized) }
-    var symbol: String {
-        switch self {
-        case .system: return "circle.lefthalf.filled"
-        case .light: return "sun.max"
-        case .dark: return "moon"
-        }
-    }
-    var native: NSAppearance? {
-        switch self {
-        case .system: return nil
-        case .light: return NSAppearance(named:.aqua)
-        case .dark: return NSAppearance(named:.darkAqua)
-        }
+enum Intensity: Int, CaseIterable {
+    case soft, balanced, bold
+
+    var label: String { ["Soft", "Balanced", "Bold"][rawValue] }
+    var perspective: Double { [0.45, 0.7, 0.9][rawValue] }
+
+    static func nearest(to perspective: Double) -> Self {
+        allCases.min { abs($0.perspective - perspective) < abs($1.perspective - perspective) } ?? .balanced
     }
 }
 
@@ -41,39 +32,10 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     @Published var checkingPermission = false
     @Published var status = "Preview is ready. Activate AthiDuo to follow your lid."
     @Published var hasPermission = CGPreflightScreenCaptureAccess()
-    @Published var onboardingComplete = UserDefaults.standard.bool(forKey: "athiduo.didCompleteOnboarding")
-    @Published var followLid = UserDefaults.standard.object(forKey:"followLid") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(followLid,forKey:"followLid") }
-    }
-    @Published var appearance = AppAppearance(rawValue:UserDefaults.standard.string(forKey:"appearance") ?? "system") ?? .system {
-        didSet {
-            UserDefaults.standard.set(appearance.rawValue,forKey:"appearance")
-            NSApp.appearance = appearance.native
-        }
-    }
-    /// The menu bar icon is optional. Hiding it never changes following or capture;
-    /// reopening AthiDuo from Applications or Spotlight always restores this window.
-    @Published var showInMenuBar = UserDefaults.standard.object(forKey:"showInMenuBar") as? Bool ?? true {
-        didSet {
-            guard oldValue != showInMenuBar else { return }
-            UserDefaults.standard.set(showInMenuBar,forKey:"showInMenuBar")
-            menuBarVisibilityChanged?(showInMenuBar)
-        }
-    }
-    /// Choosing an effect only saves and redraws. It never starts a full-screen demo.
-    @Published var effect = FoldEffect.resolve(persisted:UserDefaults.standard.string(forKey:"effect")) {
-        didSet {
-            guard oldValue != effect else { return }
-            UserDefaults.standard.set(effect.persistedIdentifier,forKey:"effect")
-            wakePreview()
-            update()
-        }
-    }
-    @Published var previewAngle = 72.0 {
-        didSet { wakePreview() }
-    }
-    @Published var clearAngle = UserDefaults.standard.object(forKey:"clearAngle") as? Double ?? 105 {
-        didSet { UserDefaults.standard.set(clearAngle,forKey:"clearAngle");resetStillness();wakePreview();update() }
+    /// Reads the previous key once so existing personal installs keep calibration.
+    @Published var referenceAngle = UserDefaults.standard.object(forKey:"referenceAngle") as? Double
+        ?? UserDefaults.standard.object(forKey:"clearAngle") as? Double ?? 105 {
+        didSet { UserDefaults.standard.set(referenceAngle,forKey:"referenceAngle");resetStillness();wakePreview();update() }
     }
     @Published var perspective = UserDefaults.standard.object(forKey:"perspective") as? Double ?? 0.7 {
         didSet { UserDefaults.standard.set(perspective,forKey:"perspective") }
@@ -99,7 +61,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         didSet { UserDefaults.standard.set(stillnessDelay,forKey:"stillnessDelay") }
     }
     @Published var demoRunning = false
-    @Published var previewPlaying = false
     @Published var sensorAvailable = false
     @Published var overlayVisible = false
     @Published var fps = 60
@@ -131,15 +92,15 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     private var overlayRevealed = false
     private var powerCheckedAt: TimeInterval = -.infinity
     private var demoStart: TimeInterval?
-    private var previewStart: TimeInterval?
     private var idleSince: TimeInterval?
     private var screenID: CGDirectDisplayID?
     private var notifications: [NSObjectProtocol] = []
     private var syntheticCheckPath: String?
     private var presentedFrames = 0
+    private var autoActivationAttempted = false
+    private var screenAccessWasVerified = UserDefaults.standard.bool(forKey: "athiduo.verifiedScreenAccess")
     var showWindow: (() -> Void)?
     var overlayVisibilityChanged: ((Bool) -> Void)?
-    var menuBarVisibilityChanged: ((Bool) -> Void)?
 
     /// Login registration lives in the system, not in our preferences. The switch
     /// reports what macOS actually holds, so a rejected change cannot show as applied.
@@ -170,22 +131,16 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         setLaunchAtLogin(true)
     }
 
-    /// Existing Screen Recording permission lets AthiDuo become ready after a
-    /// login launch. A first-time install remains explicit because macOS owns
-    /// the permission prompt.
+    /// On later launches, use a known ScreenCaptureKit grant without asking a
+    /// first-time user for permission before they choose Activate.
     func activateWhenReady() {
-        guard onboardingComplete, !enabled, sensorAvailable, hasPermission else { return }
+        guard !autoActivationAttempted, !enabled, !checkingPermission, sensorAvailable,
+              hasPermission || screenAccessWasVerified else { return }
+        autoActivationAttempted = true
         enable()
     }
 
-    func completeOnboarding() {
-        UserDefaults.standard.set(true, forKey: "athiduo.didCompleteOnboarding")
-        onboardingComplete = true
-        activateWhenReady()
-    }
-
     init() {
-        NSApp.appearance = appearance.native
         sensor.onReading = { [weak self] angle in
             guard let self else { return }
             let angleChanged = self.lidAngle != angle
@@ -203,6 +158,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 }
             }
             if angle == nil && self.enabled { self.pause(L10n.text("Lid sensor unavailable. Use the preview or reconnect the sensor.")) }
+            if angle != nil { self.activateWhenReady() }
             if self.waitingForReference, let angle, abs(angle-self.fixedReference) <= 2 {
                 self.waitingForReference = false
                 self.status = "Following your lid."
@@ -229,15 +185,11 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         observeWorkspace()
     }
 
-    private var fixedReference: Double { min(140,max(60,clearAngle.isFinite ? clearAngle : 105)) }
-    private var liveReference: Double { motionReference.reference(clearAngle:clearAngle) }
+    private var fixedReference: Double { min(140,max(60,referenceAngle.isFinite ? referenceAngle : 105)) }
+    private var liveReference: Double { motionReference.reference(referenceAngle:referenceAngle) }
 
     private var previewState: FoldVisualState {
-        if let start = previewStart {
-            let t = ProcessInfo.processInfo.systemUptime-start
-            if t <= 5 { return .at(angle:demoAngle(t/5),reference:fixedReference) }
-        }
-        return .at(angle:previewAngle,reference:fixedReference)
+        return .at(angle:72,reference:fixedReference)
     }
 
     /// Both views read the same physical and optical state, including the clear handoff.
@@ -284,7 +236,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         u.referenceAngle = Float(visual.referenceAngle)
         u.perspective = Float(perspective);u.blur = Float(blur);u.shadow = Float(shadow)
         u.fadeOnly = reducedMotion ? 1 : 0
-        u.effect = effect.shaderIndex // The desktop and its preview always share one selection.
         return u
     }
 
@@ -303,7 +254,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         return .at(angle:angle,reference:liveReference)
     }
 
-    private func demoAngle(_ t: Double) -> Double { clearAngle + 8 - sin(min(1,max(0,t)) * .pi) * (clearAngle-12) }
+    private func demoAngle(_ t: Double) -> Double { referenceAngle + 8 - sin(min(1,max(0,t)) * .pi) * (referenceAngle-12) }
 
     private var shouldClearForStillness: Bool { clearWhenStill && lidIsStill && !demoRunning }
 
@@ -331,6 +282,8 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 try await capture.verifyAccess()
                 guard !Task.isCancelled else { return }
                 self.hasPermission = true
+                self.screenAccessWasVerified = true
+                UserDefaults.standard.set(true, forKey: "athiduo.verifiedScreenAccess")
                 self.calibrateReference()
                 self.enabled = true
                 self.status = "Following your lid."
@@ -343,6 +296,8 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 let failure = error as NSError
                 if failure.domain == SCStreamErrorDomain && failure.code == SCStreamError.Code.userDeclined.rawValue {
                     self.hasPermission = false
+                    self.screenAccessWasVerified = false
+                    UserDefaults.standard.set(false, forKey: "athiduo.verifiedScreenAccess")
                     self.status = L10n.text("Screen access was not accepted. Allow AthiDuo in Screen Recording settings, then quit and reopen it.")
                 } else {
                     self.status = L10n.format("Could not enable screen capture: %@",error.localizedDescription)
@@ -354,9 +309,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
     func calibrateReference() {
         guard let angle = lidAngle, angle.isFinite else { return }
-        clearAngle = min(140, max(60, angle))
+        referenceAngle = min(140, max(60, angle))
         resetStillness()
-        status = String(format: "Reference set to %.0f°.", clearAngle)
+        status = String(format: "Reference set to %.0f°.", referenceAngle)
         wakePreview()
     }
 
@@ -377,8 +332,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         enabled = false;demoStart = nil;demoRunning = false;waitingForReference = false
         hideOverlay();capture.stop();status = message
     }
-
-    func playPreview() { previewStart = ProcessInfo.processInfo.systemUptime;previewPlaying = true }
 
     func testDesktop() {
         if !enabled { enable(startDesktopTest:true);return }
@@ -404,10 +357,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             status = L10n.text("Testing the overlay with generated artwork. Esc stops the test.")
             update()
         } catch { pause(error.localizedDescription) }
-    }
-
-    func openPrivacy() {
-        NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }
 
     func retrySensor() { sensor.stop();sensor.start() }
@@ -462,9 +411,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         let now = ProcessInfo.processInfo.systemUptime
         updateFrameRate(at:now)
         if !overlayVisible { liveAnimation.prime(at:now) }
-        if let start = previewStart, now-start > 5 {
-            previewStart = nil;previewPlaying = false;previewAngle = clearAngle+8
-        }
         if let start = demoStart, now-start > demoDuration {
             if syntheticCheckPath != nil { pause(L10n.text("Synthetic overlay test completed."));return }
             demoStart = nil;demoRunning = false

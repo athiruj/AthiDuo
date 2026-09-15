@@ -2,10 +2,10 @@ import Foundation
 
 /// The angle a completed dwell left the lid at, used as the live reference for
 /// the next movement. Without it, the first small move after the display clears
-/// is measured from the user's saved "Clears at" setting, so a two-degree change
+/// is measured from the user's saved reference setting, so a two-degree change
 /// at 111 degrees would reapply the defocus of a 19-degree fold. Rebasing on the
 /// resting angle keeps a small physical movement a small visual change while the
-/// saved setting continues to act as the upper limit at which the desktop clears.
+/// saved setting continues to act as the upper limit for the effect.
 ///
 /// This helper stores no preferences and owns no dwell logic: `AppModel` passes
 /// the already validated stillness decision from `LidStillness`.
@@ -31,10 +31,10 @@ public struct LidMotionReference {
     }
 
     /// The angle the effect should start from: the resting angle when one exists,
-    /// but never above the user's setting, which stays the clear limit. The floor
+    /// but never above the user's setting. The floor
     /// keeps a reference usable when the lid came to rest already closed.
-    public func reference(clearAngle: Double) -> Double {
-        let setting = clearAngle.isFinite ? min(140, max(60, clearAngle)) : 105
+    public func reference(referenceAngle: Double) -> Double {
+        let setting = referenceAngle.isFinite ? min(140, max(60, referenceAngle)) : 105
         guard let resting = restingAngle, resting.isFinite else { return setting }
         return max(5, min(resting, setting))
     }

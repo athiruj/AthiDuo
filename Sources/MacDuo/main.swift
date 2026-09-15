@@ -64,7 +64,8 @@ import OSLog
     @objc private func calibrate() { model.calibrateReference() }
 
     @objc private func setIntensity(_ sender: NSMenuItem) {
-        model.perspective = [0.45, 0.7, 0.9][sender.tag]
+        guard let intensity = Intensity(rawValue: sender.tag) else { return }
+        model.perspective = intensity.perspective
     }
 
     @objc private func toggleHoldStill() { model.clearWhenStill.toggle() }
@@ -100,11 +101,11 @@ import OSLog
 
         let intensity = NSMenuItem(title: "Intensity", action: nil, keyEquivalent: "")
         let intensityMenu = NSMenu(title: "Intensity")
-        for (index, option) in [("Soft", 0.45), ("Balanced", 0.7), ("Bold", 0.9)].enumerated() {
-            let item = intensityMenu.addItem(withTitle: option.0, action: #selector(setIntensity), keyEquivalent: "")
+        for option in Intensity.allCases {
+            let item = intensityMenu.addItem(withTitle: option.label, action: #selector(setIntensity), keyEquivalent: "")
             item.target = self
-            item.tag = index
-            item.state = abs(model.perspective - option.1) < 0.13 ? .on : .off
+            item.tag = option.rawValue
+            item.state = Intensity.nearest(to: model.perspective) == option ? .on : .off
         }
         intensity.submenu = intensityMenu
         menu.addItem(intensity)

@@ -15,7 +15,6 @@ struct MetalPreview: NSViewRepresentable {
             renderer.animatedState = { [weak model] in model?.animatedState(preview: true) }
             renderer.blendsWithDesktop = true
             renderer.pausesWhenSettled = true
-            renderer.keepsAnimating = { [weak model] in model?.previewPlaying ?? false }
             renderer.onFailure = { [weak model] message in model?.status = message }
             renderer.configure(view)
             context.coordinator.renderer = renderer
@@ -43,12 +42,9 @@ struct Controls: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        Group {
-            if model.onboardingComplete { settings }
-            else { Onboarding(model: model) }
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .tint(.accentColor)
+        settings
+            .background(Color(nsColor: .windowBackgroundColor))
+            .tint(.accentColor)
     }
 
     private var settings: some View {
@@ -105,14 +101,6 @@ struct Controls: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(14)
             }
-            HStack(spacing: 12) {
-                Image(systemName: "angle").foregroundStyle(.secondary)
-                Slider(value: $model.previewAngle, in: 12...160, step: 1).accessibilityLabel("Preview angle")
-                Text(String(format: "%.0f°", model.previewAngle))
-                    .font(.system(.callout, design: .monospaced).weight(.medium))
-                    .foregroundStyle(.secondary).frame(width: 42, alignment: .trailing)
-            }
-            .padding(.horizontal, 4)
         }
         .padding(12)
         .glassCard()
@@ -135,7 +123,7 @@ struct Controls: View {
             LabeledContent("Intensity") {
                 HStack(spacing: 10) {
                     Slider(value: $model.perspective, in: 0.35...1).frame(width: 190)
-                    Text(model.perspective < 0.56 ? "Soft" : model.perspective < 0.8 ? "Balanced" : "Bold")
+                    Text(Intensity.nearest(to: model.perspective).label)
                         .font(.caption.weight(.medium)).foregroundStyle(.secondary).frame(width: 58, alignment: .trailing)
                 }
             }
@@ -156,70 +144,6 @@ struct Controls: View {
             Text("Screen snapshots stay in memory on this Mac.")
         }
         .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
-    }
-}
-
-private struct Onboarding: View {
-    @ObservedObject var model: AppModel
-    @State private var step = 0
-
-    var body: some View {
-        VStack(spacing: 22) {
-            Spacer()
-            Image(nsImage: AppBrand.mark)
-                .resizable().scaledToFit().frame(width: 84, height: 84)
-            Group {
-                if step == 0 { welcome }
-                else if step == 1 { privacy }
-                else { finish }
-            }
-            .frame(maxWidth: 420)
-            Spacer()
-            HStack {
-                if step > 0 { Button("Back") { step -= 1 } }
-                Spacer()
-                Button(step == 2 ? "Finish" : "Continue") {
-                    if step == 2 { model.completeOnboarding() }
-                    else { step += 1 }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-            }
-            .frame(maxWidth: 420)
-        }
-        .padding(36)
-        .frame(minWidth: 520, minHeight: 560)
-    }
-
-    private var welcome: some View {
-        VStack(spacing: 10) {
-            Text("A gentle closing act.").font(.system(size: 30, weight: .semibold, design: .rounded))
-            Text("AthiDuo turns one desktop snapshot into a quiet, physical fold as you move your MacBook lid.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Label(model.sensorAvailable ? "Lid angle sensor detected" : "Looking for a lid angle sensor…", systemImage: model.sensorAvailable ? "checkmark.circle.fill" : "sensor.tag.radiowaves.forward")
-                .font(.callout.weight(.medium)).foregroundStyle(model.sensorAvailable ? .green : .secondary)
-                .padding(.top, 6)
-        }
-    }
-
-    private var privacy: some View {
-        VStack(spacing: 10) {
-            Text("Your screen stays private.").font(.system(size: 30, weight: .semibold, design: .rounded))
-            Text("AthiDuo asks macOS for Screen Recording only to create a temporary snapshot. It never saves or sends screen content.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Open Screen Recording Settings") { model.openPrivacy() }
-                .padding(.top, 6)
-        }
-    }
-
-    private var finish: some View {
-        VStack(spacing: 10) {
-            Text("Always within reach.").font(.system(size: 30, weight: .semibold, design: .rounded))
-            Text("AthiDuo will appear in the menu bar and open at login. Click the folded screen, press Esc, or use ⌃⌥⌘F to dismiss it anytime.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Label("Open at login is enabled", systemImage: "checkmark.circle.fill")
-                .font(.callout.weight(.medium)).foregroundStyle(.green).padding(.top, 6)
-        }
     }
 }
 

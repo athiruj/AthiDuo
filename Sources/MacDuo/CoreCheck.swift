@@ -10,12 +10,8 @@ enum CoreCheck {
     }
 
     static func run() throws {
-        guard FoldEffect.allCases == [.duo], FoldEffect.resolve(persisted: "unknown") == .duo,
-              FoldEffect.resolve(shaderIndex: 9) == .duo else {
-            throw Failure.message("Duo-only effect contract failed.")
-        }
-        guard FoldMath.progress(angle: 105, clearAngle: 105) == 0,
-              FoldMath.progress(angle: 5, clearAngle: 105) == 1 else {
+        guard FoldMath.progress(angle: 105, referenceAngle: 105) == 0,
+              FoldMath.progress(angle: 5, referenceAngle: 105) == 1 else {
             throw Failure.message("Reference-angle mapping failed.")
         }
         var stillness = LidStillness()
@@ -27,9 +23,9 @@ enum CoreCheck {
         }
         var reference = LidMotionReference()
         reference.observe(angle: 98, isStill: true, clearWhenStill: true)
-        guard reference.reference(clearAngle: 105) == 98 else {
+        guard reference.reference(referenceAngle: 105) == 98 else {
             throw Failure.message("Reference rebasing failed.")
         }
-        print("Core checks passed: Duo contract, angle mapping, stillness, and reference rebasing.")
+        print("Core checks passed: Duo mapping, stillness, and reference rebasing.")
     }
 }
