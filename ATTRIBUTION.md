@@ -1,5 +1,9 @@
 # Attribution
 
+## AthiDuo fork notice
+
+AthiDuo derives its sensor reader, capture lifecycle and original Duo renderer from `DhananjayBhosale/MacDuo` tag `v0.1.14`, licensed under MIT. It removes the updater, all network behavior, Intel packaging and every effect except Duo. The upstream MIT license remains in [LICENSE](LICENSE); upstream historical credits below are preserved for the retained work.
+
 Thanks to Sam Henri Gold for publicly documenting and demonstrating the MacBook lid-angle sensor in [LidAngleSensor](https://github.com/samhenrigold/LidAngleSensor), published under Apache License 2.0.
 
 Mac Duo's reader was written for this project. Its device identifiers (Sensor page 0x20, Orientation usage 0x8A), feature-report ID 1, and two-byte little-endian degree value were verified against that project and against this M4 MacBook Pro's hardware. No audio or other assets from that project are included.

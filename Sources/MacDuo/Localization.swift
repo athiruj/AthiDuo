@@ -5,7 +5,7 @@ import Foundation
 /// SwiftPM's absolute build-machine resource path in the executable.
 enum L10n {
     private static let bundle: Bundle = {
-        if let url = Bundle.main.url(forResource:"MacDuo_MacDuo",withExtension:"bundle"),
+        if let url = Bundle.main.url(forResource:"AthiDuo_AthiDuo",withExtension:"bundle"),
            let packaged = Bundle(url:url) { return packaged }
         return Bundle.main
     }()

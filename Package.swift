@@ -1,10 +1,8 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
-let package = Package(name: "MacDuo", defaultLocalization: "en", platforms: [.macOS(.v13)], products: [
-    .executable(name: "MacDuo", targets: ["MacDuo"])
+let package = Package(name: "AthiDuo", defaultLocalization: "en", platforms: [.macOS(.v26)], products: [
+    .executable(name: "AthiDuo", targets: ["AthiDuo"])
 ], targets: [
     .target(name: "FoldCore"),
-    .executableTarget(name: "MacDuo", dependencies: ["FoldCore"], resources: [.process("Resources")], swiftSettings: [.swiftLanguageMode(.v5)]),
-    .testTarget(name: "FoldCoreTests", dependencies: ["FoldCore"]),
-    .testTarget(name: "LocalizationTests", dependencies: ["MacDuo"])
+    .executableTarget(name: "AthiDuo", dependencies: ["FoldCore"], path: "Sources/MacDuo", resources: [.process("Resources")], swiftSettings: [.swiftLanguageMode(.v5)])
 ])

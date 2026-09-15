@@ -5,7 +5,7 @@ import FoldCore
 /// The HID report layout was identified by Sam Henri Gold's LidAngleSensor.
 /// This reader performs bounded feature reads on a dedicated queue, never the UI thread.
 final class LidSensor {
-    private let queue = DispatchQueue(label: "local.lidflow.sensor", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "com.athi.athiduo.sensor", qos: .userInteractive)
     private var manager: IOHIDManager?
     private var device: IOHIDDevice?
     private var timer: DispatchSourceTimer?

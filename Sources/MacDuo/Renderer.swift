@@ -40,6 +40,11 @@ final class FrameStore: @unchecked Sendable {
     func invalidateStream() {
         lock.lock(); acceptedStream = nil; buffer = nil; revision &+= 1; lock.unlock()
     }
+    /// Stops accepting capture callbacks while retaining the last complete frame.
+    /// AthiDuo presents this frozen image for the duration of one lid gesture.
+    func freeze() {
+        lock.lock(); acceptedStream = nil; revision &+= 1; lock.unlock()
+    }
     /// Check identity and replace the frame under the same lock as stop().
     /// Nil means rejected; true means this stream has just regained a frame.
     func put(_ value: CVPixelBuffer, from stream: ObjectIdentifier) -> Bool? {
@@ -305,8 +310,7 @@ final class FoldRenderer: NSObject, MTKViewDelegate {
 
     func encode(command: MTLCommandBuffer, pass: MTLRenderPassDescriptor, texture: MTLTexture, uniforms: FoldUniforms, sourceRevision: UInt64? = nil) throws {
         let moving = uniforms.progress > 0.00001 && uniforms.progress < 1 && uniforms.fadeOnly < 0.5
-        // Duo skips the pyramid at zero Softness. Geometrically minified effects,
-        // including Ghost, still need it to keep fine source pixels stable.
+        // Duo skips the pyramid at zero Softness and keeps the open image exact.
         let needsBlur = moving && (uniforms.blur > 0 || uniforms.selectedEffect.needsPrefilteredSource)
         let blurred = needsBlur ? try prepareBlur(command: command, input: texture, revision:sourceRevision) : texture
         guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { throw AppError.message(L10n.text("Render encoder unavailable.")) }
@@ -368,7 +372,7 @@ final class FoldRenderer: NSObject, MTKViewDelegate {
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         let title: [NSAttributedString.Key:Any] = [.font:NSFont.systemFont(ofSize:116,weight:.light), .foregroundColor:NSColor.white.withAlphaComponent(0.9)]
         let caption: [NSAttributedString.Key:Any] = [.font:NSFont.systemFont(ofSize:23,weight:.medium), .foregroundColor:NSColor.white.withAlphaComponent(0.8)]
-        let previewTitle = "Mac Duo" as NSString
+        let previewTitle = "AthiDuo" as NSString
         let titleWidth = previewTitle.size(withAttributes:title).width
         previewTitle.draw(at:CGPoint(x:(1440-titleWidth)/2,y:530),withAttributes:title)
         let previewCaption = L10n.text("A little motion. A different feeling.") as NSString

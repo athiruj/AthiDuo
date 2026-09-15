@@ -5,9 +5,9 @@ import OSLog
 
 final class DesktopCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     let frames = FrameStore()
-    private let logger = Logger(subsystem:"local.lidflow.mac",category:"capture")
+    private let logger = Logger(subsystem:"com.athi.athiduo",category:"capture")
     private var stream: SCStream?
-    private let queue = DispatchQueue(label:"local.lidflow.frames",qos:.userInteractive)
+    private let queue = DispatchQueue(label:"com.athi.athiduo.frames",qos:.userInteractive)
     private var generation = 0
     private var starting = false
     // This identity belongs to our process, not a window or Space. Keep it when
@@ -29,7 +29,7 @@ final class DesktopCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     @MainActor func verifyAccess() async throws {
         let content = try await availableContent()
         guard !content.displays.isEmpty else { throw AppError.message(L10n.text("No capturable display is available.")) }
-        guard ownApplication != nil else { throw AppError.message(L10n.text("Cannot safely exclude Mac Duo from capture. Please reopen the app.")) }
+        guard ownApplication != nil else { throw AppError.message(L10n.text("Cannot safely exclude AthiDuo from capture. Please reopen the app.")) }
     }
 
     @MainActor func start(displayID: CGDirectDisplayID, width: Int, height: Int, fps: Int) async throws {
@@ -46,7 +46,7 @@ final class DesktopCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             throw AppError.message(L10n.text("The built-in display is not available."))
         }
         // Exclude our own application explicitly, avoiding recursive capture of the overlay.
-        guard let ownApplication else { throw AppError.message(L10n.text("Cannot safely exclude Mac Duo from capture. Please reopen the app.")) }
+        guard let ownApplication else { throw AppError.message(L10n.text("Cannot safely exclude AthiDuo from capture. Please reopen the app.")) }
         let filter = SCContentFilter(display:display, excludingApplications:[ownApplication], exceptingWindows:[])
         logger.notice("Capture prepared with process exclusion; app active: \(NSApp.isActive,privacy:.public).")
         let config = SCStreamConfiguration()
@@ -77,6 +77,16 @@ final class DesktopCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         generation += 1; starting = false
         let previous = stream; stream = nil
         frames.invalidateStream()
+        if let previous { Task { try? await previous.stopCapture() } }
+    }
+
+    /// End the ScreenCaptureKit stream after its first usable frame without
+    /// discarding that frame. The frozen texture is safe to retain in memory and
+    /// prevents video or background windows from continuing to update under the overlay.
+    @MainActor func freeze() {
+        generation += 1; starting = false
+        let previous = stream; stream = nil
+        frames.freeze()
         if let previous { Task { try? await previous.stopCapture() } }
     }
 

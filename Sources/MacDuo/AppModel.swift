@@ -9,8 +9,10 @@ import IOKit.ps
 import ServiceManagement
 
 final class OverlayPanel: NSPanel {
+    var dismissAction: (() -> Void)?
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    override func mouseDown(with event: NSEvent) { dismissAction?() }
 }
 
 enum AppAppearance: String, CaseIterable, Identifiable {
@@ -37,8 +39,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     @Published var lidAngle: Double?
     @Published var enabled = false
     @Published var checkingPermission = false
-    @Published var status = L10n.text("Preview is ready. Enable Mac Duo to use your desktop.")
+    @Published var status = "Preview is ready. Activate AthiDuo to follow your lid."
     @Published var hasPermission = CGPreflightScreenCaptureAccess()
+    @Published var onboardingComplete = UserDefaults.standard.bool(forKey: "athiduo.didCompleteOnboarding")
     @Published var followLid = UserDefaults.standard.object(forKey:"followLid") as? Bool ?? true {
         didSet { UserDefaults.standard.set(followLid,forKey:"followLid") }
     }
@@ -49,7 +52,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         }
     }
     /// The menu bar icon is optional. Hiding it never changes following or capture;
-    /// reopening Mac Duo from Applications or Spotlight always restores this window.
+    /// reopening AthiDuo from Applications or Spotlight always restores this window.
     @Published var showInMenuBar = UserDefaults.standard.object(forKey:"showInMenuBar") as? Bool ?? true {
         didSet {
             guard oldValue != showInMenuBar else { return }
@@ -66,7 +69,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             update()
         }
     }
-    @Published var previewAngle = 72.0
+    @Published var previewAngle = 72.0 {
+        didSet { wakePreview() }
+    }
     @Published var clearAngle = UserDefaults.standard.object(forKey:"clearAngle") as? Double ?? 105 {
         didSet { UserDefaults.standard.set(clearAngle,forKey:"clearAngle");resetStillness();wakePreview();update() }
     }
@@ -79,7 +84,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     @Published var shadow = UserDefaults.standard.object(forKey:"shadow") as? Double ?? 0.65 {
         didSet { UserDefaults.standard.set(shadow,forKey:"shadow") }
     }
-    @Published var clearWhenStill = UserDefaults.standard.object(forKey:"clearWhenStill") as? Bool ?? true {
+    @Published var clearWhenStill = UserDefaults.standard.object(forKey:"clearWhenStill") as? Bool ?? false {
         didSet {
             if oldValue != clearWhenStill {
                 UserDefaults.standard.set(clearWhenStill,forKey:"clearWhenStill")
@@ -109,7 +114,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     private var metalView: MTKView?
     private var timer: Timer?
     private var enableTask: Task<Void, Never>?
-    private let logger = Logger(subsystem:"local.lidflow.mac",category:"lifecycle")
+    private let logger = Logger(subsystem:"com.athi.athiduo",category:"lifecycle")
     private var hotKey: EventHotKeyRef?
     private var escapeKey: EventHotKeyRef?
     private var hotKeyHandler: EventHandlerRef?
@@ -119,6 +124,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     private var displayAwake = true
     private var sensorAt: TimeInterval = 0
     private var waitingForSensor = false
+    private var waitingForReference = false
     private var stillness = LidStillness()
     private var liveAnimation = FoldVisualAnimation()
     private var motionReference = LidMotionReference()
@@ -151,10 +157,31 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         refreshLaunchAtLogin()
     }
 
-    /// The user can also remove Mac Duo in System Settings. Re-read before showing the state.
+    /// The user can also remove AthiDuo in System Settings. Re-read before showing the state.
     func refreshLaunchAtLogin() {
         let actual = SMAppService.mainApp.status == .enabled
         if launchAtLogin != actual { launchAtLogin = actual }
+    }
+
+    func configureFirstLaunch() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "athiduo.didConfigureDefaults") else { return }
+        defaults.set(true, forKey: "athiduo.didConfigureDefaults")
+        setLaunchAtLogin(true)
+    }
+
+    /// Existing Screen Recording permission lets AthiDuo become ready after a
+    /// login launch. A first-time install remains explicit because macOS owns
+    /// the permission prompt.
+    func activateWhenReady() {
+        guard onboardingComplete, !enabled, sensorAvailable, hasPermission else { return }
+        enable()
+    }
+
+    func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: "athiduo.didCompleteOnboarding")
+        onboardingComplete = true
+        activateWhenReady()
     }
 
     init() {
@@ -176,12 +203,21 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 }
             }
             if angle == nil && self.enabled { self.pause(L10n.text("Lid sensor unavailable. Use the preview or reconnect the sensor.")) }
+            if self.waitingForReference, let angle, abs(angle-self.fixedReference) <= 2 {
+                self.waitingForReference = false
+                self.status = "Following your lid."
+                self.resetStillness()
+            }
             // Keep every freshness/stillness observation, but avoid repeating
             // display discovery for identical 30 Hz sensor reports. The timer
             // still handles deadlines and the missing-report safety check.
             if angleChanged || stillnessChanged || self.waitingForSensor { self.update() }
         }
-        capture.onFirstFrame = { [weak self] in self?.update() }
+        capture.onFirstFrame = { [weak self] in
+            guard let self else { return }
+            self.capture.freeze()
+            self.update()
+        }
         capture.onUnavailable = { [weak self] in self?.hideOverlay() }
         capture.onFailure = { [weak self] reason in self?.pause(L10n.format("Capture stopped: %@",reason)) }
         registerHotKey()
@@ -201,13 +237,12 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             let t = ProcessInfo.processInfo.systemUptime-start
             if t <= 5 { return .at(angle:demoAngle(t/5),reference:fixedReference) }
         }
-        if followLid { return liveState }
         return .at(angle:previewAngle,reference:fixedReference)
     }
 
     /// Both views read the same physical and optical state, including the clear handoff.
     func animatedState(preview: Bool) -> FoldVisualState? {
-        if preview && (!followLid || previewPlaying) { return nil }
+        if preview { return nil }
         let state = liveAnimation.sample(target:overlayVisible ? liveState : .clear,
                                          at:ProcessInfo.processInfo.systemUptime)
         if overlayVisible && overlayRevealed, let panel, panel.alphaValue != CGFloat(state.coverage) {
@@ -258,7 +293,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     var liveProgress: Double { liveState.progress }
 
     private var liveState: FoldVisualState {
-        guard enabled,sessionActive,systemAwake,displayAwake,!waitingForSensor else { return .clear }
+        guard enabled,sessionActive,systemAwake,displayAwake,!waitingForSensor,!waitingForReference else { return .clear }
         if let start = demoStart {
             let t = min(1,(ProcessInfo.processInfo.systemUptime-start)/demoDuration)
             return .at(angle:demoAngle(t),reference:fixedReference)
@@ -296,8 +331,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 try await capture.verifyAccess()
                 guard !Task.isCancelled else { return }
                 self.hasPermission = true
+                self.calibrateReference()
                 self.enabled = true
-                self.status = L10n.text("Following your lid. Close it gently to see the effect.")
+                self.status = "Following your lid."
                 self.updateStillnessStatus()
                 self.logger.notice("Enable succeeded: ScreenCaptureKit access verified.")
                 if startDesktopTest { self.beginDesktopTest() } else { self.update() }
@@ -307,13 +343,21 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 let failure = error as NSError
                 if failure.domain == SCStreamErrorDomain && failure.code == SCStreamError.Code.userDeclined.rawValue {
                     self.hasPermission = false
-                    self.status = L10n.text("Screen access was not accepted. Allow the Mac Duo copy in Applications, then quit and reopen it. If its permission was already on for an older build, remove that old entry and add the current app.")
+                    self.status = L10n.text("Screen access was not accepted. Allow AthiDuo in Screen Recording settings, then quit and reopen it.")
                 } else {
                     self.status = L10n.format("Could not enable screen capture: %@",error.localizedDescription)
                 }
                 self.logger.error("Enable failed: \(failure.domain,privacy:.public) / \(failure.code)")
             }
         }
+    }
+
+    func calibrateReference() {
+        guard let angle = lidAngle, angle.isFinite else { return }
+        clearAngle = min(140, max(60, angle))
+        resetStillness()
+        status = String(format: "Reference set to %.0f°.", clearAngle)
+        wakePreview()
     }
 
     func pause(_ message: String = L10n.text("Paused. Your desktop is clear.")) {
@@ -330,7 +374,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             syntheticCheckPath = nil
             renderer?.reportsEveryPresentation = false
         }
-        enabled = false;demoStart = nil;demoRunning = false
+        enabled = false;demoStart = nil;demoRunning = false;waitingForReference = false
         hideOverlay();capture.stop();status = message
     }
 
@@ -387,6 +431,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         panel.level = NSWindow.Level(rawValue:Int(CGWindowLevelForKey(.statusWindow))+1)
         panel.isOpaque = true;panel.backgroundColor = .black;panel.hasShadow = false
         panel.ignoresMouseEvents = true;panel.hidesOnDeactivate = false
+        panel.dismissAction = { [weak self] in self?.dismissOverlay() }
         panel.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary,.stationary,.ignoresCycle]
         panel.isReleasedWhenClosed = false
         panel.sharingType = .none
@@ -445,16 +490,16 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             logger.notice("Fresh sensor reports received; automatic following resumed.")
         }
         let target = liveProgress
-        let shouldCapture = demoRunning || (!shouldClearForStillness && (lidAngle ?? 180) < liveReference+14)
+        let shouldCapture = demoRunning || (!waitingForReference && abs((lidAngle ?? liveReference)-liveReference) >= 2)
         guard shouldCapture || capture.isRunning || overlayVisible else { return }
         guard let screen = builtInScreen(), let display = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               CGDisplayIsInMirrorSet(display.uint32Value) == 0 else {
-            pause(L10n.text("Mac Duo needs an active, unmirrored built-in display."));return
+            pause(L10n.text("AthiDuo needs an active, unmirrored built-in display."));return
         }
         if shouldCapture {
             idleSince = nil
             do { try prepareOverlay(on:screen) } catch { pause(error.localizedDescription);return }
-            if !capture.isRunning && syntheticCheckPath == nil {
+            if !capture.isRunning && !capture.frames.hasFrame && syntheticCheckPath == nil {
                 let width = Int(screen.frame.width*screen.backingScaleFactor)
                 let height = Int(screen.frame.height*screen.backingScaleFactor)
                 Task {
@@ -477,6 +522,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
                 panel?.alphaValue = 0; overlayRevealed = false
                 overlayVisible = true
                 overlayVisibilityChanged?(true)
+                panel?.ignoresMouseEvents = false
                 panel?.orderFrontRegardless()
                 // Let MTKView own and retire its drawable. Start with a paused,
                 // explicit view draw, then use the display-paced render loop.
@@ -504,13 +550,21 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 
     private func hideOverlay() {
-        panel?.orderOut(nil);panel?.alphaValue = 0;metalView?.isPaused = true
+        panel?.orderOut(nil);panel?.alphaValue = 0;panel?.ignoresMouseEvents = true;metalView?.isPaused = true
         metalView?.releaseDrawables()
         overlayVisible = false; overlayRevealed = false
         renderer?.releaseTransientResources()
         liveAnimation.reset()
         overlayVisibilityChanged?(false)
         if let escapeKey { UnregisterEventHotKey(escapeKey);self.escapeKey = nil }
+    }
+
+    func dismissOverlay() {
+        guard overlayVisible else { return }
+        hideOverlay()
+        capture.stop()
+        waitingForReference = true
+        status = "Dismissed. Return to the reference angle to rearm."
     }
 
     private func registerHotKey() {
@@ -522,7 +576,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             let escape = event.keyCode == UInt16(kVK_Escape) && (self.overlayVisible || self.demoRunning)
             let chord = event.keyCode == UInt16(kVK_ANSI_F) && mods == [.control,.option,.command]
             if escape || chord {
-                self.pause(L10n.text("Stopped with the keyboard shortcut. Your desktop is clear."))
+                self.dismissOverlay()
                 return nil
             }
             return event
@@ -533,7 +587,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
             guard let context else { return OSStatus(eventNotHandledErr) }
             DispatchQueue.main.async {
                 let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
-                model.pause(L10n.text("Stopped with the keyboard shortcut. Your desktop is clear."))
+                model.dismissOverlay()
             }
             return noErr
         },1,&eventType,context,&hotKeyHandler)
